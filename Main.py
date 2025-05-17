@@ -1,25 +1,25 @@
-from flask import Flask,request,Response
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from myWealthCom import getTransactionDetails
-import jsonify
 
-app = Flask(__name__)
+app = FastAPI()
 
-@app.route("/")
+@app.get("/")
 def hello_world():
     return "Hello, World!"
 
-@app.route("/transactions", methods=['POST'])
-def transactions():
-    # getTransactionDetails(request,app)
-
-    res=getTransactionDetails(request,app)
-    response = Response(
-        response=res,
-        status=200,
-        mimetype='application/json'
-    )
-    return response
+@app.post("/transactions")
+async def transactions(request: Request):
+    # Call your original function with the request object
+    res = await getTransactionDetails(request)
     
+    # If the result is a dictionary or list, return a JSON response
+    if isinstance(res, (dict, list)):
+        return JSONResponse(content=res,status_code=200)
+    else:
+        # Otherwise, return the result directly
+        return JSONResponse(content=res, status_code=200)
 
 if __name__ == "__main__":
-    app.run(port=3000)
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=3000)
