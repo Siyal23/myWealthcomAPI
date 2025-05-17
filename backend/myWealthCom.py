@@ -31,7 +31,7 @@ async def getFinanceData(csv_text):
         4)If the name appears more than once in the same transaction, output that entry separately, with each entry considered unique based on its combination of name, debit, and credit.
         5)Make sure the correct name is extracted from each transaction. For example, "RAMNAYAN" should not be confused with "RUTUGAND" or any other name in the list.
         7)Do not provide any extra text only provide data not extra code.
-        9)Do not provide column headers in response.
+        9)Do not provide column headers in response. 
         {csv_text}
         """
     )
@@ -79,6 +79,14 @@ async def convertXlsToCsv(id, req):
     df = pd.read_csv(filepath, skiprows=20, engine="python", sep=None)
     df.to_csv(filepath, index=False)
 
+async def getListOfNames(response)->list:
+    final_names_list=[]
+    lines = response.split("\n")
+    for line in lines:
+        name_part=line.split(",")
+        final_names_list.append(name_part[0].strip())
+    return final_names_list
+
 async def getTransactionDetails(req):
     form_data = await req.form()
     type = form_data.get('type')
@@ -103,11 +111,12 @@ async def getTransactionDetails(req):
         chunk_size = 15
         chunks = [df1[i:i+chunk_size] for i in range(0, len(df1), chunk_size)]
         chunk_texts = [chunk.to_csv(index=False) for chunk in chunks]
-
-        all_responses = []
+        names=[]
         for chunk_text in chunk_texts:
             response = await getFinanceData(chunk_text)
             response_text = response.text.strip().removeprefix("```json").removesuffix("```").strip()
-            print(response_text)
-            all_responses.append(response_text)
-        return all_responses
+            names.extend(await getListOfNames(response_text))
+        df = df[:-2]
+        df['names']=names
+        df.to_csv('output.csv',index=False)
+        return names
