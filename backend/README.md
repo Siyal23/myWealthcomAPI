@@ -7,7 +7,7 @@ This is a **FastAPI-based** application designed to process **financial transact
 
 ## Features 🌟
 
-- **File Upload**: Upload CSV files containing transaction data.
+- **File Upload**: Upload XLSX files containing transaction data.
 - **AI Data Extraction**: Use Gemini AI models to extract useful information from the transaction descriptions.
 - **Flexible Output**: Returns processed data in JSON format for easy integration.
 
@@ -60,7 +60,7 @@ Request
 
     Body:
 
-        file: The CSV file containing transaction data.
+        file: The XLSX file containing transaction data.
 
         type: The type of data ("finance" or "stock").
 
@@ -70,7 +70,7 @@ curl -X 'POST' \
   'http://127.0.0.1:8000/transactions' \
   -H 'accept: application/json' \
   -H 'Content-Type: multipart/form-data' \
-  -F 'file=@path_to_your_file.csv' \
+  -F 'file=@path_to_your_file.xlsx' \
   -F 'type=finance'
 
 Response
