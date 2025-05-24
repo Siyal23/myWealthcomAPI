@@ -91,6 +91,8 @@ Response
   ]
 }
 
+docker build -t mywealthcom .
+docker run -p 3000:3000 mywealthcom
 
 Made with ❤️ Siyal Patil
 
