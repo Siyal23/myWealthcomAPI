@@ -4,6 +4,7 @@ import pandas as pd
 import json
 import uuid
 import os
+from fastapi.responses import FileResponse
 
 # Set up Gemini
 genai.configure(api_key="AIzaSyCs35IuDNP6xMBx1y5iJJxGEfBHq0V_wBk")
@@ -15,25 +16,40 @@ MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16 MB
 
 async def getFinanceData(csv_text):
     finRes = model.generate_content(
-         f"""
-        Your are financial advisor.I have a CSV file with transaction data, and I need to extract 
-        specific names from the "Description". Please output each name found in the "Description" 
-        as a separate with the tabular format providing name,credit,debit.
-        Where name is the extracted name from the "Description" field.In case you cannot find what name
-        should be extracted.give most possible name that can be found.
-        Some example names to consider:
-        1)by debit card-OTHPOS509413474245GOOGLE PLAY APP CYBS S2240920005-- = GOOGLE PLAY APP
-        2)BY TRANSFER-NEFT*ICIC0000009*ICIN212026633934*Salary 2025APR M-- = Salary
-        Important points:
-        1)Do not omit any entry, even if the same name appears multiple times or with the same debit/credit values.
-        2)Ensure each transaction is processed separately, even if the name appears in different rows.
-        3)Treat each name, debit, and credit value as unique for each transaction and ensure that every occurrence of a name is processed as a distinct entry.
-        4)If the name appears more than once in the same transaction, output that entry separately, with each entry considered unique based on its combination of name, debit, and credit.
-        5)Make sure the correct name is extracted from each transaction. For example, "RAMNAYAN" should not be confused with "RUTUGAND" or any other name in the list.
-        7)Do not provide any extra text only provide data not extra code.
-        9)Do not provide column headers in response. 
+        f"""          
+        You are a financial data parser.
+
+        Below is a CSV with multiple transaction rows. Each row contains a 'Description' field.
+
+        Your task:
+        - Extract **only one name per row** from the 'Description'.
+        - Return one name per row, in the same order.
+        - If no obvious name, return the most likely business/person involved.
+        - Do NOT add headers, explanations, or extra text.
+        - The number of lines in your output MUST equal the number of rows in the CSV.
+
+        CSV:
         {csv_text}
         """
+        #  f"""
+        # Your are financial advisor.I have a CSV file with transaction data, and I need to extract 
+        # specific names from the "Description". Please output each name found in the "Description" 
+        # as a separate with the tabular format providing name,credit,debit.
+        # Where name is the extracted name from the "Description" field.In case you cannot find what name
+        # should be extracted.give most possible name that can be found.
+        # Some example names to consider:
+        # 1)by debit card-OTHPOS509413474245GOOGLE PLAY APP CYBS S2240920005-- = GOOGLE PLAY APP
+        # 2)BY TRANSFER-NEFT*ICIC0000009*ICIN212026633934*Salary 2025APR M-- = Salary
+        # Important points:
+        # 1)Do not omit any entry, even if the same name appears multiple times or with the same debit/credit values.
+        # 2)Ensure each transaction is processed separately, even if the name appears in different rows.
+        # 3)Treat each name, debit, and credit value as unique for each transaction and ensure that every occurrence of a name is processed as a distinct entry.
+        # 4)If the name appears more than once in the same transaction, output that entry separately, with each entry considered unique based on its combination of name, debit, and credit.
+        # 5)Make sure the correct name is extracted from each transaction. For example, "RAMNAYAN" should not be confused with "RUTUGAND" or any other name in the list.
+        # 7)Do not provide any extra text only provide data not extra code.
+        # 9)Do not provide column headers in response. 
+        # {csv_text}
+        # """
     )
     return finRes
 
@@ -107,7 +123,7 @@ async def getTransactionDetails(req):
 
     else:
         df = pd.read_csv(f"{UPLOAD_FOLDER}\\{str(uid)}.csv")
-        df1 = df.drop(columns=['Txn Date', 'Value Date', 'Ref No./Cheque No.', 'Balance'])
+        df1 = df.drop(columns=['Txn Date', 'Value Date', 'Ref No./Cheque No.','        Debit','Credit', 'Balance'])
         chunk_size = 15
         chunks = [df1[i:i+chunk_size] for i in range(0, len(df1), chunk_size)]
         chunk_texts = [chunk.to_csv(index=False) for chunk in chunks]
@@ -116,7 +132,12 @@ async def getTransactionDetails(req):
             response = await getFinanceData(chunk_text)
             response_text = response.text.strip().removeprefix("```json").removesuffix("```").strip()
             names.extend(await getListOfNames(response_text))
-        df = df[:-2]
+        #df = df[:-2]
         df['names']=names
-        df.to_csv('output.csv',index=False)
-        return names
+        output_path = os.path.join(UPLOAD_FOLDER, "output.csv")
+        df.to_csv(output_path, index=False)
+        return FileResponse(
+            output_path,
+            media_type="text/csv",
+            filename="output.csv"
+        )

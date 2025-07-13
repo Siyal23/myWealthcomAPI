@@ -1,8 +1,16 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from myWealthCom import getTransactionDetails
+from fastapi.middleware.cors import CORSMiddleware
+
 
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],  # frontend origin
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/")
 def hello_world():
@@ -10,16 +18,7 @@ def hello_world():
 
 @app.post("/transactions")
 async def transactions(request: Request):
-    # Call your original function with the request object
-    res = await getTransactionDetails(request)
-    
-    # If the result is a dictionary or list, return a JSON response
-    if isinstance(res, (dict, list)):
-        return JSONResponse(content=res,status_code=200)
-    else:
-        # Otherwise, return the result directly
-        return JSONResponse(content=res, status_code=200)
-
+    return await getTransactionDetails(request) 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=3000)
+    uvicorn.run(app, host="0.0.0.0", port=5000)
