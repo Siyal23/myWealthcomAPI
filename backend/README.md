@@ -31,6 +31,7 @@ python -m venv venv
 source venv/bin/activate  # For Linux/macOS
 venv\Scripts\activate  # For Windows
 
+pip freeze | ForEach-Object { ($_ -split '==')[0] } > requirements.txt 
 pip install -r requirements.txt
 
 
