@@ -5,10 +5,16 @@ import json
 import uuid
 import os
 from fastapi.responses import FileResponse
+from anthropic import Anthropic
+import tomllib
+from dotenv import load_dotenv
 
-# Set up Gemini
-genai.configure(api_key="AIzaSyCs35IuDNP6xMBx1y5iJJxGEfBHq0V_wBk")
-model = genai.GenerativeModel("gemini-1.5-flash")
+load_dotenv()
+claude_api_key = os.getenv("ANTHROPIC_API_KEY")
+client = Anthropic (
+    api_key=claude_api_key
+)
+model_name = os.getenv("MODEL_NAME")
 
 # Configuration variables
 UPLOAD_FOLDER = "uploads"
