@@ -112,7 +112,7 @@ async def getTransactionDetails(req):
 
     # Process data based on type
     if type == "stock":
-        df = pd.read_csv(f"{UPLOAD_FOLDER}\\{str(uid)}.csv")
+        df = pd.read_csv(os.path.join(UPLOAD_FOLDER,f"{str(uid)}.csv"))
         csv_text = df.to_string(index=False)
         stock_response = await getStockData(csv_text)
         clean = stock_response.text.strip().removeprefix("```json").removesuffix("```").strip()
@@ -120,7 +120,7 @@ async def getTransactionDetails(req):
         return jsonres
 
     else:
-        df = pd.read_csv(f"{UPLOAD_FOLDER}\\{str(uid)}.csv")
+        df = pd.read_csv(os.path.join(UPLOAD_FOLDER,f"{str(uid)}.csv"))
         df = df[df['Description'].notna()]
         df = df[~df['Description'].astype(str).str.startswith('**')]
         df = df.reset_index(drop=True)

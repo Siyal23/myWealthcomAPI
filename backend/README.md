@@ -92,8 +92,8 @@ Response
   ]
 }
 
-docker build -t mywealthcom .
-docker run -p 3000:3000 mywealthcom
+docker build -t wealthcomapi .
+docker run -p 5000:5000 --env-file .env wealthcomapi
 
 Made with ❤️ Siyal Patil
 
