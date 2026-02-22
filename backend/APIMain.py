@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from myWealthCom import getTransactionDetails
 from fastapi.middleware.cors import CORSMiddleware
-
+import os
 
 app = FastAPI()
 app.add_middleware(
@@ -22,4 +22,5 @@ async def transactions(request: Request):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
