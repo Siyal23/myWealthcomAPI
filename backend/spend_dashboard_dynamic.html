@@ -339,7 +339,6 @@ async function loadDashboard() {
       '<div class="empty-state">No outgoing transactions found.</div>';
   }
 
-  // ---- dynamic flow: use actual counterparties/buckets from this statement ----
   const totalOut = DATA.reduce((s,r) => s + (Number(r.Debit) || 0), 0);
   const flowMap = {};
 
@@ -356,23 +355,34 @@ async function loadDashboard() {
     flowMap[label] = (flowMap[label] || 0) + debit;
   });
 
-  const segments = Object.entries(flowMap)
+  const allSegments = Object.entries(flowMap)
     .sort((a,b) => b[1] - a[1])
-    .slice(0, 8)
     .map(([label,val]) => ({label,val}));
+
+  const MAX_VISIBLE_DESTINATIONS = 7;
+  const topSegments = allSegments.slice(0, MAX_VISIBLE_DESTINATIONS);
+  const topTotal = topSegments.reduce((sum, s) => sum + s.val, 0);
+  const otherTotal = Math.max(0, totalOut - topTotal);
+
+  const segments = [...topSegments];
+  if (otherTotal > 0.009) {
+    segments.push({label:'Other', val:otherTotal, isOther:true});
+  }
 
   const fb = document.getElementById('flowbar');
   const legend = document.getElementById('flowlegend');
   fb.innerHTML = '';
   legend.innerHTML = '';
 
+  const displayedTotal = segments.reduce((sum, s) => sum + s.val, 0);
+
   segments.forEach((s,index) => {
-    const pct = totalOut ? (s.val / totalOut * 100) : 0;
-    if (pct < 0.3) return;
+    const pct = displayedTotal ? (s.val / displayedTotal * 100) : 0;
 
     const div = document.createElement('div');
     div.style.width = pct + '%';
     div.style.background = index === 0 ? '#a13d2f' : '#7d8f69';
+    div.style.boxSizing = 'border-box';
     div.textContent = pct > 6
       ? `${s.label} · ${pct.toFixed(0)}%`
       : (pct > 2.5 ? pct.toFixed(0) + '%' : '');
