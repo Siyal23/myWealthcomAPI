@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Cash Flow — Aug 2026</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --ink:#1c2321;
+    --paper:#f7f5f0;
+    --paper-raised:#ffffff;
+    --rule:#d8d3c4;
+    --gone:#a13d2f;      /* true spend - terracotta-red, "gone" */
+    --moved:#7d8f69;     /* self transfer - sage, "still yours" */
+    --invested:#3d5a6c;  /* invested - slate blue */
+    --received:#c98a3a;  /* income/received - ochre */
+    --muted:#8a8578;
+    --mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+    --serif: 'Source Serif 4', Georgia, serif;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:var(--serif); -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1100px;margin:0 auto;padding:36px 24px 80px;}
+
+  header{border-bottom:2px solid var(--ink); padding-bottom:20px; margin-bottom:28px;}
+  .eyebrow{font-family:var(--mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); margin-bottom:6px;}
+  h1{font-size:34px; margin:0 0 6px; font-weight:600; letter-spacing:-.01em;}
+  .sub{font-family:var(--mono); font-size:12.5px; color:var(--muted); display:flex; gap:18px; flex-wrap:wrap;}
+
+  /* Ledger summary strip */
+  .ledger{
+    display:grid; grid-template-columns:repeat(4,1fr); gap:1px;
+    background:var(--rule); border:1px solid var(--rule); margin-bottom:32px;
+  }
+  .ledger .cell{background:var(--paper-raised); padding:18px 20px;}
+  .ledger .cell .k{font-family:var(--mono); font-size:10.5px; text-transform:uppercase; letter-spacing:.1em; color:var(--muted); margin-bottom:8px;}
+  .ledger .cell .v{font-family:var(--mono); font-size:24px; font-weight:600; line-height:1;}
+  .ledger .cell .d{font-size:12px; color:var(--muted); margin-top:6px;}
+  .c-gone .v{color:var(--gone);}
+  .c-moved .v{color:var(--moved);}
+  .c-invested .v{color:var(--invested);}
+  .c-received .v{color:var(--received);}
+
+  section{margin-bottom:40px;}
+  h2{font-size:13px; font-family:var(--mono); text-transform:uppercase; letter-spacing:.1em; color:var(--ink);
+     border-bottom:1px solid var(--rule); padding-bottom:10px; margin:0 0 18px; display:flex; justify-content:space-between; align-items:baseline;}
+  h2 span{color:var(--muted); font-weight:400; text-transform:none; letter-spacing:0;}
+
+  .grid2{display:grid; grid-template-columns:1.1fr .9fr; gap:28px;}
+  @media(max-width:820px){.grid2{grid-template-columns:1fr;}}
+
+  .flow-bar{display:flex; height:44px; border:1px solid var(--ink); overflow:hidden; margin-bottom:14px;}
+  .flow-bar div{display:flex; align-items:center; justify-content:center; font-family:var(--mono); font-size:11px; color:#fff; white-space:nowrap; overflow:hidden;}
+  .legend{display:flex; gap:18px; flex-wrap:wrap; font-family:var(--mono); font-size:11.5px; color:var(--muted);}
+  .legend .sw{display:inline-block; width:10px; height:10px; margin-right:6px; vertical-align:-1px;}
+
+  canvas{max-width:100%;}
+
+  table{width:100%; border-collapse:collapse; font-size:13px;}
+  thead th{
+    font-family:var(--mono); font-size:10.5px; text-transform:uppercase; letter-spacing:.06em;
+    color:var(--muted); text-align:left; padding:8px 10px; border-bottom:2px solid var(--ink);
+    position:sticky; top:0; background:var(--paper);
+  }
+  tbody td{padding:8px 10px; border-bottom:1px solid var(--rule); vertical-align:top;}
+  tbody tr:hover{background:rgba(0,0,0,0.02);}
+  .amt{font-family:var(--mono); text-align:right; white-space:nowrap;}
+  .amt.debit{color:var(--gone);}
+  .amt.credit{color:var(--received);}
+  .tag{font-family:var(--mono); font-size:10.5px; padding:2px 7px; border:1px solid var(--rule); display:inline-block; white-space:nowrap;}
+  .date-col{font-family:var(--mono); font-size:12px; color:var(--muted); white-space:nowrap;}
+  .cp-col{font-weight:600;}
+
+  .controls{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;}
+  .controls button{
+    font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.04em;
+    padding:7px 12px; background:var(--paper-raised); border:1px solid var(--rule); color:var(--ink);
+    cursor:pointer; transition:all .15s;
+  }
+  .controls button:hover{border-color:var(--ink);}
+  .controls button.active{background:var(--ink); color:var(--paper); border-color:var(--ink);}
+  .controls input[type=text]{
+    font-family:var(--mono); font-size:12px; padding:7px 12px; border:1px solid var(--rule);
+    background:var(--paper-raised); flex:1; min-width:160px; color:var(--ink);
+  }
+
+  .table-wrap{max-height:520px; overflow-y:auto; border:1px solid var(--rule);}
+
+  .note-box{background:#efe9da; border-left:3px solid var(--received); padding:14px 18px; font-size:13.5px; line-height:1.5; margin-top:14px;}
+  .note-box b{color:var(--ink);}
+  .destination-list{border:1px solid var(--rule);background:var(--paper-raised);}
+  .destination-row{display:grid;grid-template-columns:34px 1fr auto;gap:12px;align-items:center;padding:13px 16px;border-bottom:1px solid var(--rule);}
+  .destination-row:last-child{border-bottom:0;}
+  .destination-rank{font-family:var(--mono);font-size:11px;color:var(--muted);}
+  .destination-name{font-weight:600;font-size:15px;}
+  .destination-meta{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:3px;}
+  .destination-track{height:5px;background:var(--rule);margin-top:8px;overflow:hidden;}
+  .destination-track div{height:100%;background:var(--gone);}
+  .destination-value{font-family:var(--mono);font-size:13px;font-weight:600;white-space:nowrap;}
+  .empty-state{padding:24px;color:var(--muted);font-family:var(--mono);font-size:11px;}
+
+  footer{font-family:var(--mono); font-size:10.5px; color:var(--muted); text-align:center; margin-top:50px; padding-top:20px; border-top:1px solid var(--rule);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="loadingNotice" style="font-family:var(--mono);font-size:11px;color:var(--muted);padding:8px 0;">Loading statement data…</div>
+
+  <header>
+
+  <div style="display:flex; gap:10px; align-items:center; margin:0 0 18px 0; padding:10px 0; border-bottom:1px solid var(--rule);">
+    <input id="pdfInput" type="file" accept=".pdf,application/pdf" style="font-family:var(--mono); font-size:11px; max-width:280px;">
+    <button id="processPdf" style="font-family:var(--mono); font-size:11px; padding:7px 12px; border:1px solid var(--rule); background:transparent; cursor:pointer;">Process statement</button>
+    <span id="processStatus" style="font-family:var(--mono); font-size:11px; color:var(--muted);"></span>
+  </div>
+    <div class="eyebrow" id="accountLabel">Bank Account &nbsp;·&nbsp; Statement Period</div>
+    <h1 id="dashboardTitle">Cash Flow</h1>
+    <div class="sub">
+      <span id="transactionCount">0 transactions</span>
+      <span>·</span>
+      <span id="balanceSummary">Opening — → Closing —</span>
+    </div>
+  </header>
+
+  <div class="ledger" id="headlineLedger">
+    <div class="cell c-gone">
+      <div class="k">True Spend</div>
+      <div class="v" id="k-spent">—</div>
+      <div class="d">Money that actually left you</div>
+    </div>
+    <div class="cell c-moved">
+      <div class="k">Money Received</div>
+      <div class="v" id="k-received">—</div>
+      <div class="d">Total credits during this period</div>
+    </div>
+    <div class="cell c-invested">
+      <div class="k">Invested</div>
+      <div class="v" id="k-invest">—</div>
+      <div class="d" id="k-invest-detail">Investment outflow</div>
+    </div>
+    <div class="cell c-received">
+      <div class="k" id="k-top-title">Top Destination</div>
+      <div class="v" id="k-top">—</div>
+      <div class="d" id="k-top-detail">Largest outgoing destination</div>
+    </div>
+  </div>
+
+  <section id="destinationSection">
+    <h2>Where your money went <span>top destinations</span></h2>
+    <div id="destinationList" class="destination-list"></div>
+  </section>
+
+  <section>
+    <h2 id="flowTitle">Where the money went <span>proportional flow</span></h2>
+    <div class="flow-bar" id="flowbar"></div>
+    <div class="legend" id="flowlegend"></div>
+    <div class="note-box">
+      <b>Reading this:</b> The flow is generated from the transactions in this statement.
+      It highlights the destinations that received money during the selected period.
+    </div>
+  </section>
+
+  <section class="grid2">
+    <div>
+      <h2>Balance over time <span>daily closing balance</span></h2>
+      <canvas id="balanceChart" height="220"></canvas>
+    </div>
+    <div>
+      <h2>Spend by category <span id="spendTotal">₹0 total</span></h2>
+      <canvas id="spendChart" height="220"></canvas>
+    </div>
+  </section>
+
+  <section>
+    <h2>Every transaction <span id="rowcount">0 rows</span></h2>
+    <div class="controls" id="filterControls"></div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Date</th><th>Counterparty</th><th>Description</th><th>Bucket</th><th class="amt">Debit</th><th class="amt">Credit</th><th class="amt">Balance</th></tr>
+        </thead>
+        <tbody id="txnBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer id="footerText">Generated from bank statement · amounts in INR · dashboard is view-only</footer>
+</div>
+
+<script>
+let DATA = [];
+let META = {};
+
+function safeText(value){
+  return String(value ?? '')
+    .replaceAll('&','&amp;')
+    .replaceAll('<','&lt;')
+    .replaceAll('>','&gt;')
+    .replaceAll('"','&quot;')
+    .replaceAll("'",'&#039;');
+}
+
+const BUCKET_COLOR = {
+  'Person UPI': '#a13d2f',
+  'Food & Delivery': '#a13d2f',
+  'Rent': '#a13d2f',
+  'Bills': '#a13d2f',
+  'Subscription': '#a13d2f',
+  'Self Transfer (HDFC)': '#7d8f69',
+  'Investment': '#3d5a6c',
+  'Rutugandha (Person)': '#c98a3a',
+  'Bank Credit': '#c98a3a'
+};
+const TRUE_SPEND_BUCKETS = ['Rent','Bills','Food & Delivery','Subscription'];
+
+function fmt(n){ return '₹' + Math.abs(n).toLocaleString('en-IN', {maximumFractionDigits:0}); }
+
+
+async function loadDashboard() {
+  const loading = document.getElementById('loadingNotice');
+  if (loading) loading.style.display = 'block';
+  const response = await fetch('/api/dashboard-data', {cache: 'no-store'});
+  if (!response.ok) {
+    throw new Error(`Dashboard data request failed (${response.status})`);
+  }
+
+  const payload = await response.json();
+  DATA = Array.isArray(payload.transactions) ? payload.transactions : [];
+  META = payload.meta || {};
+
+  // ---- dynamic header ----
+  document.getElementById('accountLabel').textContent =
+    `${META.bank || 'Bank'} A/C ${META.account_masked ? META.account_masked + ' · ' : ''}· Statement Period`;
+
+  document.getElementById('dashboardTitle').textContent =
+    `Cash Flow, ${META.period_label || 'Statement Period'}`;
+
+  document.getElementById('transactionCount').textContent =
+    `${DATA.length} transactions`;
+
+  document.getElementById('balanceSummary').textContent =
+    `Opening ${fmt(META.opening_balance || 0)} → Closing ${fmt(META.closing_balance || 0)}`;
+
+  document.getElementById('flowTitle').innerHTML =
+    `Where ${fmt(META.total_debits || 0)} out of ${META.bank || 'the account'} actually went <span>proportional flow</span>`;
+
+  // ---- dynamic insights from transaction data ----
+  const spendByBucket = {};
+  const destinationStats = {};
+  let totalReceived = 0;
+  let investmentOut = 0;
+  let investmentIn = 0;
+
+  DATA.forEach(r => {
+    const debit = Number(r.Debit) || 0;
+    const credit = Number(r.Credit) || 0;
+    const bucket = r.Bucket || 'Other Spend';
+    const cp = String(r.Counterparty || '').trim() || 'Unknown';
+
+    spendByBucket[bucket] = (spendByBucket[bucket] || 0) + debit - credit;
+    if (credit > 0) totalReceived += credit;
+
+    if (bucket === 'Investment') {
+      investmentOut += debit;
+      investmentIn += credit;
+    }
+
+    if (!destinationStats[cp]) {
+      destinationStats[cp] = {name: cp, sent: 0, received: 0, buckets: {}};
+    }
+    destinationStats[cp].sent += debit;
+    destinationStats[cp].received += credit;
+    if (debit > 0) {
+      destinationStats[cp].buckets[bucket] =
+        (destinationStats[cp].buckets[bucket] || 0) + debit;
+    }
+  });
+
+  const trueSpendBuckets = new Set(
+    META.true_spend_buckets || [
+      'Rent','Bills','Food & Delivery','Subscription',
+      'Person UPI','Other Spend'
+    ]
+  );
+
+  let trueSpend = 0;
+  trueSpendBuckets.forEach(bucket => {
+    trueSpend += spendByBucket[bucket] || 0;
+  });
+
+  const topDestinations = Object.values(destinationStats)
+    .filter(x => x.sent > 0)
+    .sort((a,b) => b.sent - a.sent);
+
+  const topDestination = topDestinations[0];
+
+  document.getElementById('k-spent').textContent = fmt(trueSpend);
+  document.getElementById('k-received').textContent = fmt(totalReceived);
+  document.getElementById('k-invest').textContent =
+    fmt(Math.max(0, investmentOut - investmentIn));
+  document.getElementById('k-invest-detail').textContent =
+    investmentOut
+      ? `₹${investmentOut.toLocaleString('en-IN')} sent to investments`
+      : 'No investment outflow detected';
+
+  document.getElementById('k-top').textContent =
+    topDestination ? fmt(topDestination.sent) : '—';
+  document.getElementById('k-top-detail').textContent =
+    topDestination
+      ? `${topDestination.name} · largest outgoing destination`
+      : 'No outgoing destination detected';
+
+  const destinationList = document.getElementById('destinationList');
+  const maxDestination = topDestinations.length ? topDestinations[0].sent : 0;
+
+  destinationList.innerHTML = topDestinations.slice(0, 8).map((d, i) => {
+    const pct = maxDestination ? (d.sent / maxDestination * 100) : 0;
+    const net = d.sent - d.received;
+
+    return `<div class="destination-row">
+      <div class="destination-rank">${i + 1}</div>
+      <div class="destination-main">
+        <div class="destination-name">${safeText(d.name)}</div>
+        <div class="destination-meta">
+          Sent ${fmt(d.sent)}
+          ${d.received ? ` · Received ${fmt(d.received)} · Net ${net >= 0 ? 'out' : 'in'} ${fmt(Math.abs(net))}` : ''}
+        </div>
+        <div class="destination-track"><div style="width:${Math.min(100, pct)}%"></div></div>
+      </div>
+      <div class="destination-value">${fmt(d.sent)}</div>
+    </div>`;
+  }).join('');
+
+  if (!topDestinations.length) {
+    destinationList.innerHTML =
+      '<div class="empty-state">No outgoing transactions found.</div>';
+  }
+
+  // ---- dynamic flow: use actual counterparties/buckets from this statement ----
+  const totalOut = DATA.reduce((s,r) => s + (Number(r.Debit) || 0), 0);
+  const flowMap = {};
+
+  DATA.forEach(r => {
+    const debit = Number(r.Debit) || 0;
+    if (debit <= 0) return;
+
+    const bucket = r.Bucket || 'Other Spend';
+    const cp = String(r.Counterparty || '').trim();
+    const label = cp && cp !== 'Unknown' && bucket !== 'Bank Credit'
+      ? cp
+      : bucket;
+
+    flowMap[label] = (flowMap[label] || 0) + debit;
+  });
+
+  const segments = Object.entries(flowMap)
+    .sort((a,b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([label,val]) => ({label,val}));
+
+  const fb = document.getElementById('flowbar');
+  const legend = document.getElementById('flowlegend');
+  fb.innerHTML = '';
+  legend.innerHTML = '';
+
+  segments.forEach((s,index) => {
+    const pct = totalOut ? (s.val / totalOut * 100) : 0;
+    if (pct < 0.3) return;
+
+    const div = document.createElement('div');
+    div.style.width = pct + '%';
+    div.style.background = index === 0 ? '#a13d2f' : '#7d8f69';
+    div.textContent = pct > 6
+      ? `${s.label} · ${pct.toFixed(0)}%`
+      : (pct > 2.5 ? pct.toFixed(0) + '%' : '');
+    div.title = `${s.label}: ${fmt(s.val)}`;
+    fb.appendChild(div);
+  });
+
+  segments.forEach((s,index) => {
+    const span = document.createElement('span');
+    const color = index === 0 ? '#a13d2f' : '#7d8f69';
+    span.innerHTML =
+      `<span class="sw" style="background:${color}"></span>${safeText(s.label)} — ${fmt(s.val)}`;
+    legend.appendChild(span);
+  });
+
+  // ---- balance chart ----
+  const oldBalance = Chart.getChart(document.getElementById('balanceChart'));
+  if (oldBalance) oldBalance.destroy();
+
+  new Chart(document.getElementById('balanceChart'), {
+    type:'line',
+    data:{
+      labels: DATA.map(r=>r.Date.slice(0,5)),
+      datasets:[{
+        data: DATA.map(r=>r.Balance),
+        borderColor:'#1c2321',
+        backgroundColor:'rgba(28,35,33,0.06)',
+        fill:true, tension:.15, pointRadius:0, borderWidth:1.5
+      }]
+    },
+    options:{
+      plugins:{legend:{display:false}},
+      scales:{
+        x:{ticks:{maxTicksLimit:10, font:{family:'monospace', size:10}}, grid:{display:false}},
+        y:{ticks:{callback:v=>'₹'+(v/1000).toFixed(0)+'k', font:{family:'monospace', size:10}}, grid:{color:'#e8e4d8'}}
+      }
+    }
+  });
+
+  // ---- spend by category chart ----
+  const categoryTotals = {};
+  DATA.forEach(r => {
+    const b = r.Bucket || 'Other Spend';
+    if (!trueSpendBuckets.has(b)) return;
+    categoryTotals[b] = (categoryTotals[b] || 0) + (Number(r.Debit)||0) - (Number(r.Credit)||0);
+  });
+
+  const categoryPairs = Object.entries(categoryTotals)
+    .filter(([,v]) => v > 0.009)
+    .sort((a,b) => b[1] - a[1]);
+
+  const spendChart = Chart.getChart(document.getElementById('spendChart'));
+  if (spendChart) spendChart.destroy();
+
+  new Chart(document.getElementById('spendChart'), {
+    type:'bar',
+    data:{
+      labels:categoryPairs.map(([k]) => k),
+      datasets:[{
+        data:categoryPairs.map(([,v]) => v),
+        backgroundColor:'#a13d2f'
+      }]
+    },
+    options:{
+      indexAxis:'y',
+      plugins:{legend:{display:false}},
+      scales:{
+        x:{ticks:{callback:v=>'₹'+v, font:{family:'monospace', size:10}}, grid:{color:'#e8e4d8'}},
+        y:{ticks:{font:{family:'monospace', size:11}}, grid:{display:false}}
+      }
+    }
+  });
+
+  // ---- transaction table with filters ----
+  const controls = document.getElementById('filterControls');
+  controls.innerHTML = '';
+
+  const buckets = ['All', ...new Set(DATA.map(r=>r.Bucket || 'Other'))];
+  let searchInput;
+
+  buckets.forEach(b=>{
+    const btn = document.createElement('button');
+    btn.textContent = b;
+    btn.dataset.bucket = b;
+    if(b==='All') btn.classList.add('active');
+    btn.onclick = ()=>{
+      document.querySelectorAll('#filterControls button').forEach(x=>x.classList.remove('active'));
+      btn.classList.add('active');
+      render();
+    };
+    controls.appendChild(btn);
+  });
+
+  searchInput = document.createElement('input');
+  searchInput.type='text';
+  searchInput.placeholder='Search counterparty…';
+  searchInput.oninput = render;
+  controls.appendChild(searchInput);
+
+  function render(){
+    const activeButton = document.querySelector('#filterControls button.active');
+    const activeBucket = activeButton ? activeButton.dataset.bucket : 'All';
+    const q = searchInput.value.trim().toLowerCase();
+
+    const rows = DATA.filter(r=>{
+      const matchBucket = activeBucket==='All' || r.Bucket===activeBucket;
+      const cp = String(r.Counterparty || '').toLowerCase();
+      const desc = String(r.Direction_Category || '').toLowerCase();
+      const raw = String(r.Details || '').toLowerCase();
+      const matchSearch = !q || cp.includes(q) || desc.includes(q) || raw.includes(q);
+      return matchBucket && matchSearch;
+    });
+
+    document.getElementById('rowcount').textContent = rows.length + ' rows';
+
+    const tbody = document.getElementById('txnBody');
+    tbody.innerHTML = rows.map(r=>{
+      const color = BUCKET_COLOR[r.Bucket] || '#8a8578';
+      const debit = Number(r.Debit) || 0;
+      const credit = Number(r.Credit) || 0;
+      const balance = Number(r.Balance) || 0;
+      const safe = value => String(value ?? '')
+        .replaceAll('&','&amp;')
+        .replaceAll('<','&lt;')
+        .replaceAll('>','&gt;')
+        .replaceAll('"','&quot;')
+        .replaceAll("'","&#039;");
+
+      return `<tr>
+        <td class="date-col">${safe(String(r.Date || '').slice(0,5))}</td>
+        <td class="cp-col">${safe(r.Counterparty || '—')}</td>
+        <td style="color:var(--muted); font-size:12px;">${safe(r.Direction_Category || '')}</td>
+        <td><span class="tag" style="border-color:${color}55; color:${color}">${safe(r.Bucket || 'Other')}</span></td>
+        <td class="amt debit">${debit>0?fmt(debit):''}</td>
+        <td class="amt credit">${credit>0?fmt(credit):''}</td>
+        <td class="amt" style="color:var(--muted)">${fmt(balance)}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  render();
+  if (loading) loading.style.display = 'none';
+}
+
+function showError(error) {
+  console.error(error);
+  document.getElementById('txnBody').innerHTML =
+    `<tr><td colspan="7" style="padding:24px; color:#a13d2f;">
+      Could not load dashboard data. Start the Python server and refresh this page.
+    </td></tr>`;
+}
+
+
+document.getElementById('processPdf').onclick = async () => {
+  const input = document.getElementById('pdfInput');
+  const status = document.getElementById('processStatus');
+
+  if (!input.files.length) {
+    status.textContent = 'Choose a PDF first.';
+    return;
+  }
+
+  const form = new FormData();
+  form.append('file', input.files[0]);
+
+  status.textContent = 'Processing PDF…';
+
+  try {
+    const response = await fetch('/api/process-statement', {
+      method: 'POST',
+      body: form
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.detail || 'Processing failed.');
+    }
+
+    status.textContent =
+      `Done — ${result.transaction_count} transactions. Refreshing…`;
+
+    await loadDashboard();
+    status.textContent = `Loaded ${result.period}.`;
+  } catch (error) {
+    console.error(error);
+    status.textContent = error.message || 'Processing failed.';
+  }
+};
+
+loadDashboard().catch(showError);
+</script>
+</body>
+</html>
