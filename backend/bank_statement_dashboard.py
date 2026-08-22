@@ -920,6 +920,29 @@ async def dashboard_data():
     return JSONResponse(json.loads(DATA_JSON.read_text(encoding="utf-8")))
 
 
+@app.delete("/api/delete-dashboard-data")
+async def delete_dashboard_data():
+    """Delete the generated dashboard data stored on the server."""
+    if not DATA_JSON.exists():
+        return {
+            "message": "No dashboard data was stored on the server.",
+            "deleted": False,
+        }
+
+    try:
+        DATA_JSON.unlink()
+    except OSError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Could not delete dashboard data: {exc}",
+        ) from exc
+
+    return {
+        "message": "Dashboard data deleted successfully.",
+        "deleted": True,
+    }
+
+
 @app.post("/api/process-statement")
 async def process_statement_endpoint(file: UploadFile = File(...)):
     if not file.filename.lower().endswith(".pdf"):

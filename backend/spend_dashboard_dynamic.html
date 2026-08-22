@@ -114,6 +114,7 @@
   <div style="display:flex; gap:10px; align-items:center; margin:0 0 18px 0; padding:10px 0; border-bottom:1px solid var(--rule);">
     <input id="pdfInput" type="file" accept=".pdf,application/pdf" style="font-family:var(--mono); font-size:11px; max-width:280px;">
     <button id="processPdf" style="font-family:var(--mono); font-size:11px; padding:7px 12px; border:1px solid var(--rule); background:transparent; cursor:pointer;">Process statement</button>
+    <button id="deleteDashboard" style="font-family:var(--mono); font-size:11px; padding:7px 12px; border:1px solid #a13d2f; background:transparent; color:#a13d2f; cursor:pointer;">Delete data</button>
     <span id="processStatus" style="font-family:var(--mono); font-size:11px; color:var(--muted);"></span>
   </div>
     <div class="eyebrow" id="accountLabel">Bank Account &nbsp;·&nbsp; Statement Period</div>
@@ -570,6 +571,77 @@ document.getElementById('processPdf').onclick = async () => {
   } catch (error) {
     console.error(error);
     status.textContent = error.message || 'Processing failed.';
+  }
+};
+
+/*
+ * Delete the currently stored dashboard data from the server.
+ * This deletes dashboard_data.json only; it does not delete the
+ * application source files or the PDF selected in the browser.
+ */
+document.getElementById('deleteDashboard').onclick = async () => {
+  const status = document.getElementById('processStatus');
+  const confirmed = window.confirm(
+    'Delete the processed statement data from the server? This cannot be undone.'
+  );
+
+  if (!confirmed) return;
+
+  status.textContent = 'Deleting dashboard data…';
+
+  try {
+    const response = await fetch('/api/delete-dashboard-data', {
+      method: 'DELETE'
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.detail || 'Delete failed.');
+    }
+
+    // Clear the currently displayed dashboard immediately.
+    DATA = [];
+    META = {};
+
+    document.getElementById('accountLabel').textContent =
+      'Bank Account · Statement Period';
+    document.getElementById('dashboardTitle').textContent = 'Cash Flow';
+    document.getElementById('transactionCount').textContent = '0 transactions';
+    document.getElementById('balanceSummary').textContent = 'Opening — → Closing —';
+    document.getElementById('flowTitle').innerHTML =
+      'Where your money went <span>proportional flow</span>';
+
+    document.getElementById('k-spent').textContent = '—';
+    document.getElementById('k-received').textContent = '—';
+    document.getElementById('k-invest').textContent = '—';
+    document.getElementById('k-top').textContent = '—';
+    document.getElementById('k-invest-detail').textContent = 'Investment outflow';
+    document.getElementById('k-top-detail').textContent = 'Largest outgoing destination';
+
+    document.getElementById('destinationList').innerHTML =
+      '<div class="empty-state">No processed statement data.</div>';
+    document.getElementById('flowbar').innerHTML = '';
+    document.getElementById('flowlegend').innerHTML = '';
+    document.getElementById('txnBody').innerHTML = '';
+    document.getElementById('rowcount').textContent = '0 rows';
+    document.getElementById('filterControls').innerHTML = '';
+
+    // Remove existing charts.
+    const balanceChart = Chart.getChart(document.getElementById('balanceChart'));
+    if (balanceChart) balanceChart.destroy();
+
+    const spendChart = Chart.getChart(document.getElementById('spendChart'));
+    if (spendChart) spendChart.destroy();
+
+    status.textContent = result.deleted
+      ? 'Dashboard data deleted from server.'
+      : 'No dashboard data was stored on server.';
+
+    document.getElementById('pdfInput').value = '';
+  } catch (error) {
+    console.error(error);
+    status.textContent = error.message || 'Delete failed.';
   }
 };
 
