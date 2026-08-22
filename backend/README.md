@@ -1,23 +1,164 @@
-# myWealthCom API 🚀
+# myWealthCom 💰
 
-[![Python Version](https://img.shields.io/badge/python-3.8%2B-blue)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.75.0-green)](https://fastapi.tiangolo.com/)
+A **personal finance dashboard application** that processes **bank statement PDFs**, extracts transaction data with AI, classifies transactions, and turns the results into a dynamic cash-flow dashboard. A Python/FastAPI backend powers the processing and serves the dashboard.
 
-This is a **FastAPI-based** application designed to process **financial transaction data** and **extract relevant information** using AI models. It can handle both general transactions and stock data.
+The goal is to answer not only **"what category did I spend on?"**, but also **"where did my money actually go?"** — including people, merchants, investments, transfers, and recurring destinations.
 
 ## Features 🌟
 
-- **File Upload**: Upload XLSX files containing transaction data.
-- **AI Data Extraction**: Use Gemini AI models to extract useful information from the transaction descriptions.
-- **Flexible Output**: Returns processed data in JSON format for easy integration.
+- **Bank Statement PDF Upload**: Upload a bank statement PDF for processing.
+- **AI Transaction Extraction**: Uses Claude to extract transaction rows from bank statement pages.
+- **Page-Based Processing**: Large statements are processed in page chunks rather than sending the entire PDF in one large request.
+- **Standard Transaction Schema**: Extracts:
+  - Date
+  - Raw description / narration
+  - Reference number
+  - Debit
+  - Credit
+  - Balance
+  - OCR uncertainty when applicable
+- **Transaction Classification**:
+  - Python handles obvious/known transaction patterns locally.
+  - Claude classifies transactions that require additional interpretation.
+- **Counterparty Tracking**: Keeps track of who or what received/sent money, rather than relying only on broad categories such as Food or Investment.
+- **Dynamic Categories**: Transactions are normalized into categories such as spending, investment, self-transfer, bills, food, subscriptions, and person-to-person transfers.
+- **Dynamic Cash-Flow Dashboard**: Dashboard insights are generated from the actual statement data rather than hard-coded names such as a specific person or bank account.
+- **Top Destinations**: Shows the largest outgoing destinations based on the transactions in the uploaded statement.
+- **Token Usage Logging**: Prints Claude input/output/cache usage for each extraction/classification operation and the total usage for the request.
+- **Streaming Claude Requests**: Uses streaming for longer Claude operations.
+- **JSON Dashboard Data**: Produces transaction/dashboard data consumed by the HTML dashboard.
+
+## Architecture
+
+```text
+Bank Statement PDF
+        |
+        v
+   FastAPI Upload
+        |
+        v
+ Extract PDF Pages
+        |
+        v
+ Split into Page Chunks
+        |
+        v
+ Claude - Transaction Extraction
+        |
+        v
+ Raw Transaction JSON
+        |
+        v
+ Python Validation / Normalization
+        |
+        +----------------------+
+        |                      |
+        v                      v
+ Obvious Transactions     Ambiguous Transactions
+ Python Rules             Claude Classification
+        |                      |
+        +----------+-----------+
+                   |
+                   v
+        Final Transaction Data
+                   |
+                   v
+        Dashboard JSON Data
+                   |
+                   v
+        Dynamic HTML Dashboard
+```
+
+## Transaction Extraction
+
+Each extracted transaction is normalized to a common structure:
+
+```json
+{
+  "date": "DD/MM/YYYY",
+  "raw_description": "string",
+  "ref_no": "string or null",
+  "debit": 1000.00,
+  "credit": null,
+  "balance": 25000.00
+}
+```
+
+If OCR makes a row uncertain, the transaction can also contain:
+
+```json
+{
+  "ocr_uncertain": true
+}
+```
+
+The extraction process is designed to preserve the original narration instead of cleaning or shortening it, because the narration is later useful for identifying counterparties and classifying transactions.
+
+## Classification
+
+Classification has two stages.
+
+### 1. Local Python classification
+
+Transactions that can be identified reliably from existing rules are classified without another Claude request.
+
+This reduces API usage and keeps obvious classifications deterministic.
+
+### 2. Claude classification
+
+Transactions that cannot be confidently classified locally are sent to Claude.
+
+Claude returns a compact classification containing information such as:
+
+```json
+{
+  "index": 12,
+  "counterparty": "Example Person",
+  "bucket": "PERSON"
+}
+```
+
+Python then normalizes the result into the final dashboard fields.
+
+This separation keeps the expensive AI step focused on transactions that actually need interpretation.
+
+## Dashboard
+
+The dashboard is intentionally **data-driven** rather than being built around one person's statement.
+
+For example, the dashboard does not permanently assume that a user has:
+
+- Rutugandha
+- HDFC transfers
+- Zerodha
+- Any particular merchant
+
+Instead, the UI calculates insights from the uploaded statement.
+
+Examples of dynamic insights include:
+
+- True spend
+- Money received
+- Investments
+- Top outgoing destination
+- Where your money went
+- Spending by category
+- Transaction history
+- Balance over time
+
+If one user's largest destination is a friend, that person can appear. If another user's largest destination is Amazon, a credit-card account, a landlord, or an investment account, the dashboard can show that instead.
 
 ## Requirements 📋
 
 - Python 3.8+
 - FastAPI
+- Uvicorn
 - Pandas
-- Gemini AI API
-- Uvicorn (for running the server)
+- pdfplumber
+- Anthropic Python SDK
+- python-dotenv
+
+The exact installed package versions should be maintained in `requirements.txt`.
 
 ## Installation 🛠️
 
@@ -26,74 +167,197 @@ Clone the repository:
 ```bash
 git clone https://github.com/your-username/myWealthCom.git
 cd myWealthCom
+```
 
+Create and activate a virtual environment:
+
+```bash
 python -m venv venv
-source venv/bin/activate  # For Linux/macOS
-venv\Scripts\activate  # For Windows
+```
 
-pip freeze | ForEach-Object { ($_ -split '==')[0] } > requirements.txt 
+Windows:
+
+```powershell
+venv\Scripts\activate
+```
+
+Linux/macOS:
+
+```bash
+source venv/bin/activate
+```
+
+Install dependencies from `requirements.txt`:
+
+```bash
 pip install -r requirements.txt
+```
 
+If `requirements.txt` needs to be regenerated from the current virtual environment:
 
-Running the Application 🏃‍♂️
+```powershell
+pip freeze | ForEach-Object { ($_ -split '==')[0] } > requirements.txt
+```
 
-To start the FastAPI application, run:
+## Environment Variables 🔐
 
-python Main.py
+Create a `.env` file in the backend/project directory.
 
-API Endpoints 📡
-GET / 🌐
+For example:
 
-Check if the API is running.
+```env
+ANTHROPIC_API_KEY=your_anthropic_api_key
+```
 
-Response:
+Do **not** commit `.env` or API keys to GitHub.
 
-{
-  "message": "Hello, World!"
-}
+The application loads environment variables using `python-dotenv`.
 
-POST /transactions 💼
+## Running the Application 🏃‍♂️
 
-This endpoint processes transaction data by extracting relevant details from an uploaded CSV file.
-Request
+From the backend directory:
 
-    Content-Type: multipart/form-data
+```powershell
+python bank_statement_dashboard.py
+```
 
-    Body:
+The FastAPI server runs at:
 
-        file: The XLSX file containing transaction data.
+```text
+http://127.0.0.1:8000
+```
 
-        type: The type of data ("finance" or "stock").
+Open the dashboard in your browser.
 
-Example cURL Request:
+## API Endpoints 📡
 
-curl -X 'POST' \
-  'http://127.0.0.1:8000/transactions' \
-  -H 'accept: application/json' \
-  -H 'Content-Type: multipart/form-data' \
-  -F 'file=@path_to_your_file.xlsx' \
-  -F 'type=finance'
+### `GET /`
 
-Response
+Serves the dashboard HTML page.
 
-{
-  "status": "success",
-  "data": [
-    {
-      "name": "GOOGLE PLAY APP",
-      "credit": 50.00,
-      "debit": 0.00
-    },
-    {
-      "name": "Salary",
-      "credit": 0.00,
-      "debit": 1000.00
-    }
-  ]
-}
+### `GET /api/dashboard-data`
 
+Returns the currently generated dashboard data used by the frontend.
+
+### `POST /api/process-statement`
+
+Processes an uploaded bank statement PDF.
+
+The endpoint:
+
+1. Receives the PDF.
+2. Extracts its pages.
+3. Sends page chunks to Claude for transaction extraction.
+4. Combines and validates the extracted transactions.
+5. Applies local classification rules.
+6. Sends unresolved transactions to Claude for classification.
+7. Normalizes the classification results.
+8. Generates the dashboard data.
+9. Returns the processed dashboard.
+
+## Token Usage
+
+The application prints usage for every Claude operation.
+
+Example:
+
+```text
+============================================================
+Claude operation : PDF extraction pages 1-2
+Model            : claude-haiku-4-5-20251001
+Input tokens     : 2,391
+Output tokens    : 1,906
+Cache write      : 0
+Cache read       : 0
+Total tokens     : 4,297
+============================================================
+```
+
+At the end of processing, total usage is printed:
+
+```text
+============================================================
+TOTAL CLAUDE USAGE
+Input tokens     : ...
+Output tokens    : ...
+Cache write      : ...
+Cache read       : ...
+Total tokens     : ...
+============================================================
+```
+
+Page chunking and local classification are used to avoid unnecessarily large Claude requests and reduce token consumption.
+
+## Generated Files
+
+`dashboard_data.json` is generated application data used by the dashboard.
+
+It should normally **not be committed to Git** if it contains personal bank transaction information. Add it to `.gitignore`:
+
+```gitignore
+dashboard_data.json
+```
+
+Similarly, keep secrets and local environments out of Git:
+
+```gitignore
+.env
+venv/
+__pycache__/
+*.pyc
+```
+
+## Important Security Note 🔒
+
+Bank statements contain sensitive financial information.
+
+Do not commit:
+
+- Bank statement PDFs
+- `.env`
+- API keys
+- Personal transaction data
+- Generated `dashboard_data.json`
+
+Use `.gitignore` to prevent accidental commits.
+
+## Docker
+
+If Docker configuration is present in the project, the application can be built and run with:
+
+```bash
 docker build -t wealthcomapi .
 docker run -p 5000:5000 --env-file .env wealthcomapi
+```
+
+Make sure the container configuration and exposed port match the current FastAPI application configuration.
+
+## Project Goal 💰
+
+This project is intended to provide a more useful view of personal finances than a basic category-based spending report.
+
+Instead of only showing:
+
+```text
+Food       ₹5,000
+Investment ₹10,000
+```
+
+the dashboard aims to show:
+
+```text
+Where did the money go?
+
+Friend       ₹7,000
+Zerodha     ₹10,000
+Amazon       ₹4,000
+Rent        ₹25,000
+```
+
+while still retaining category-level information.
+
+The goal is to make recurring relationships, destinations, transfers, investments, and actual spending easier to understand from a bank statement.
+
+---
 
 Made with ❤️ Siyal Patil
-
