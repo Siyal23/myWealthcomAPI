@@ -55,14 +55,6 @@ if not MODEL_NAME:
 
 client = Anthropic(api_key=ANTHROPIC_API_KEY)
 
-TOTAL_USAGE = {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "cache_creation_input_tokens": 0,
-    "cache_read_input_tokens": 0,
-}
-
-
 app = FastAPI(title="Bank Statement Cash Flow Dashboard")
 
 
@@ -137,12 +129,20 @@ Rules:
 CLASSIFICATION_PROMPT = r"""
 Classify each supplied bank transaction.
 
-Return ONLY valid JSON, no prose or markdown.
-Return one compact object per input:
+IMPORTANT OUTPUT FORMAT:
+- Return ONLY one valid JSON ARRAY.
+- The first character of your response must be "[".
+- The last character of your response must be "]".
+- Return exactly ONE object for every input transaction.
+- Keep the objects in the same order as the input.
+- Do NOT return a wrapper object such as {"transactions":[...]}.
+- Do NOT return prose, explanations, markdown, or code fences.
+
+Each output object MUST contain exactly:
 {"index": integer, "counterparty": "short name", "bucket": "CODE"}
 
 Allowed bucket codes:
-HDFC = own HDFC transfer
+HDFC = own-account transfer to/from HDFC
 INV = investment/broker/mutual fund/clearing
 RUTU = Rutugandha
 RENT = clearly identified rent
@@ -155,6 +155,7 @@ OTHER = other clear spend
 
 Use only evidence in the narration and debit/credit direction.
 Do not invent identities. Counterparty should be 1-4 words, or "Unknown".
+Do not add final_category or direction_category; Python creates those fields.
 """
 
 
@@ -162,30 +163,28 @@ Do not invent identities. Counterparty should be 1-4 words, or "Unknown".
 def parse_json_response(text: str) -> Any:
     cleaned = (text or "").strip()
 
-    # Remove markdown fences if Claude added them.
     cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.I)
-    cleaned = re.sub(r"\s*```$", "", cleaned)
+    cleaned = re.sub(r"\s*```$", "", cleaned).strip()
 
     try:
         return json.loads(cleaned)
-    except json.JSONDecodeError:
-        # Find the first complete JSON value and ignore accidental text
-        # after it.
+    except json.JSONDecodeError as first_error:
         decoder = json.JSONDecoder()
 
-        start_positions = [
-            cleaned.find("["),
-            cleaned.find("{"),
-        ]
-        start_positions = [p for p in start_positions if p >= 0]
+        # Classification responses must be arrays. For extraction we also
+        # support an object because the generic parser is shared.
+        starts = [p for p in (cleaned.find("["), cleaned.find("{")) if p >= 0]
 
-        if not start_positions:
-            raise
+        if not starts:
+            raise first_error
 
-        start = min(start_positions)
+        start = min(starts)
+        try:
+            value, _ = decoder.raw_decode(cleaned[start:])
+            return value
+        except json.JSONDecodeError:
+            raise first_error
 
-        value, _ = decoder.raw_decode(cleaned[start:])
-        return value
 
 def call_claude(
     content: list[dict[str, Any]],
@@ -224,11 +223,6 @@ def call_claude(
     print(f"Cache write      : {cache_creation:,}")
     print(f"Cache read       : {cache_read:,}")
     print(f"Total tokens     : {input_tokens + output_tokens:,}")
-    TOTAL_USAGE["input_tokens"] += input_tokens
-    TOTAL_USAGE["output_tokens"] += output_tokens
-    TOTAL_USAGE["cache_creation_input_tokens"] += cache_creation
-    TOTAL_USAGE["cache_read_input_tokens"] += cache_read
-
     print("=" * 60)
 
     if not parts:
@@ -372,19 +366,51 @@ _BUCKETS = {
 
 
 def build_final_category(counterparty: str, bucket_code: str) -> str:
-    category_map = {
-        "HDFC": "Own HDFC Account Transfer (Self)",
-        "INV": f"{counterparty} (Investment)",
-        "RUTU": "Rutugandha (Person)",
+    """
+    Build the human-readable category shown in the dashboard.
+
+    The category is derived from the generic bucket code and the
+    transaction's actual counterparty. It does not assume a particular
+    person or merchant exists for every user.
+    """
+    cp = str(counterparty or "Unknown").strip()
+
+    base = {
+        "HDFC": "Self Transfer",
+        "INV": "Investment",
+        "RUTU": "Person-to-Person",
         "RENT": "Rent",
-        "BILL": f"{counterparty} (Bill)",
-        "FOOD": f"{counterparty} (Food/Delivery)",
-        "SUB": f"{counterparty} (Subscription)",
+        "BILL": "Bill",
+        "FOOD": "Food & Delivery",
+        "SUB": "Subscription",
         "PERSON": "Person-to-Person UPI",
         "BANK": "Bank Credit",
-        "OTHER": f"{counterparty} (Other Spend)",
-    }
-    return category_map.get(bucket_code, f"{counterparty} (Other Spend)")
+        "OTHER": "Other Spend",
+    }.get(bucket_code, "Other Spend")
+
+    if cp == "Unknown":
+        return base
+
+    if bucket_code == "HDFC":
+        return f"{cp} (Self Transfer)"
+    if bucket_code == "INV":
+        return f"{cp} (Investment)"
+    if bucket_code == "RUTU":
+        return f"{cp} (Person)"
+    if bucket_code == "RENT":
+        return f"{cp} (Rent)"
+    if bucket_code == "BILL":
+        return f"{cp} (Bill)"
+    if bucket_code == "FOOD":
+        return f"{cp} (Food/Delivery)"
+    if bucket_code == "SUB":
+        return f"{cp} (Subscription)"
+    if bucket_code == "PERSON":
+        return f"{cp} (Person-to-Person UPI)"
+    if bucket_code == "BANK":
+        return f"{cp} (Bank Credit)"
+
+    return f"{cp} ({base})"
 
 
 def build_direction_category(
@@ -392,71 +418,103 @@ def build_direction_category(
     counterparty: str,
     bucket_code: str,
 ) -> str:
-    debit = money(tx["debit"])
-    credit = money(tx["credit"])
+    """
+    Build a human-readable money-flow direction.
+
+    This is intentionally generic. It does not hard-code SBI, HDFC, or
+    any other account name into the direction text.
+    """
+    cp = str(counterparty or "Unknown").strip()
+    debit = money(tx.get("debit"))
+    credit = money(tx.get("credit"))
 
     if bucket_code == "HDFC":
-        return (
-            "SBI -> HDFC (transferred to own HDFC a/c)"
-            if debit > 0
-            else "HDFC -> SBI (received from own HDFC a/c)"
-        )
+        if debit > 0:
+            return f"{cp} (self transfer sent)" if cp != "Unknown" else "Self transfer sent"
+        if credit > 0:
+            return f"{cp} (self transfer received)" if cp != "Unknown" else "Self transfer received"
 
     if bucket_code == "INV":
-        return (
-            f"SBI -> {counterparty} (investment)"
-            if debit > 0
-            else f"{counterparty} -> SBI (received)"
-        )
-
-    if bucket_code == "BANK":
-        return "Bank Credit received"
+        if debit > 0:
+            return f"{cp} (investment)" if cp != "Unknown" else "Investment sent"
+        if credit > 0:
+            return f"{cp} (investment received)" if cp != "Unknown" else "Investment received"
 
     if debit > 0:
-        return f"SBI -> {counterparty} (sent)"
+        return f"{cp} (sent)" if cp != "Unknown" else "Money sent"
+
     if credit > 0:
-        return f"{counterparty} -> SBI (received)"
-    return counterparty
+        return f"{cp} (received)" if cp != "Unknown" else "Money received"
+
+    return "No money movement"
 
 
-def _apply_classification(
-    tx: dict[str, Any],
-    classification: dict[str, Any],
-) -> None:
+def _apply_classification(tx, classification):
+    # Claude uses "bucket"; local Python rules use "bucket_code".
+    # Accept both so the two classification paths have one common interface.
     bucket_code = (
         classification.get("bucket")
         or classification.get("bucket_code")
     )
-    counterparty = classification.get("counterparty") or "Unknown"
+
+    counterparty = (
+        classification.get("counterparty")
+        or "Unknown"
+    )
 
     if not bucket_code:
         raise ValueError(
             f"Classification is missing bucket/bucket_code: {classification}"
         )
 
-    if bucket_code not in _BUCKETS:
+    bucket_map = {
+        "HDFC": "Self Transfer (HDFC)",
+        "INV": "Investment",
+        "RUTU": "Rutugandha (Person)",
+        "RENT": "Rent",
+        "BILL": "Bills",
+        "FOOD": "Food & Delivery",
+        "SUB": "Subscription",
+        "PERSON": "Person UPI",
+        "BANK": "Bank Credit",
+        "OTHER": "Other Spend",
+    }
+
+    if bucket_code not in bucket_map:
         raise ValueError(
             f"Unknown bucket code '{bucket_code}' "
             f"for classification: {classification}"
         )
 
     tx["counterparty"] = counterparty
-    tx["bucket"] = _BUCKETS[bucket_code]
+    tx["bucket"] = bucket_map[bucket_code]
+
     tx["final_category"] = build_final_category(
-        counterparty, bucket_code
-    )
-    tx["direction_category"] = build_direction_category(
-        tx, counterparty, bucket_code
+        counterparty,
+        bucket_code,
     )
 
+    tx["direction_category"] = build_direction_category(
+        tx,
+        counterparty,
+        bucket_code,
+    )
 
 def validate_classification_schema(
-    classification: dict[str, Any],
-    source: str = "unknown",
-) -> None:
+    classification,
+    source="unknown",
+):
+    """
+    Validate every classification object before it is applied.
+
+    This catches mapping/key problems in one place instead of allowing
+    them to appear later as KeyError/NameError exceptions.
+    """
+
     if not isinstance(classification, dict):
         raise ValueError(
-            f"{source}: classification is not an object: {classification!r}"
+            f"{source}: classification is not an object: "
+            f"{classification!r}"
         )
 
     if "index" not in classification:
@@ -469,21 +527,40 @@ def validate_classification_schema(
             f"{source}: missing 'counterparty': {classification}"
         )
 
+    # Claude returns "bucket".
+    # Local rules may return "bucket_code".
+    if not (
+        classification.get("bucket")
+        or classification.get("bucket_code")
+    ):
+        raise ValueError(
+            f"{source}: missing 'bucket' or 'bucket_code': "
+            f"{classification}"
+        )
+
+    allowed = {
+        "HDFC",
+        "INV",
+        "RUTU",
+        "RENT",
+        "BILL",
+        "FOOD",
+        "SUB",
+        "PERSON",
+        "BANK",
+        "OTHER",
+    }
+
     bucket = (
         classification.get("bucket")
         or classification.get("bucket_code")
     )
-    if not bucket:
-        raise ValueError(
-            f"{source}: missing 'bucket' or 'bucket_code': {classification}"
-        )
 
-    if bucket not in _BUCKETS:
+    if bucket not in allowed:
         raise ValueError(
             f"{source}: invalid bucket '{bucket}'. "
-            f"Allowed values: {sorted(_BUCKETS)}"
+            f"Allowed values: {sorted(allowed)}"
         )
-
 
 def classify_transactions(
     transactions: list[dict[str, Any]],
@@ -491,24 +568,20 @@ def classify_transactions(
     final = [dict(tx) for tx in transactions]
     unresolved: list[int] = []
 
-    # First classify obvious transactions locally.
     for i, tx in enumerate(final):
         local = _local_classification(i, tx)
 
-        if local is None:
+        if local is not None:
+            validate_classification_schema(
+                local,
+                source=f"local classification transaction {i}",
+            )
+            _apply_classification(tx, local)
+        else:
             unresolved.append(i)
-            continue
 
-        validate_classification_schema(
-            local,
-            source=f"local classification transaction {i}",
-        )
-        _apply_classification(tx, local)
-
-    # Send only ambiguous transactions to Claude.
     for start in range(0, len(unresolved), CLASSIFICATION_CHUNK_SIZE):
         batch = unresolved[start:start + CLASSIFICATION_CHUNK_SIZE]
-
         compact = [
             {
                 "index": i,
@@ -518,73 +591,45 @@ def classify_transactions(
             }
             for i in batch
         ]
-
         prompt = (
             CLASSIFICATION_PROMPT
             + "\n\nINPUT:\n"
-            + json.dumps(
-                compact,
-                ensure_ascii=False,
-                separators=(",", ":"),
-            )
+            + json.dumps(compact, ensure_ascii=False, separators=(",", ":"))
         )
-
         text = call_claude(
             [{"type": "text", "text": prompt}],
             max_tokens=CLASSIFICATION_MAX_TOKENS,
-            operation=(
-                f"Transaction classification "
-                f"{start + 1}-{start + len(batch)}"
-            ),
+            operation=f"Transaction classification {start + 1}-{start + len(batch)}",
         )
-
         classified = parse_json_response(text)
-
         if not isinstance(classified, list):
+            preview = (text or "").replace("\n", " ")[:500]
             raise ValueError(
-                "Classification result is not a JSON array."
+                "Classification result is not a JSON array. "
+                f"Claude returned: {preview!r}"
             )
-
         if len(classified) != len(batch):
             raise ValueError(
                 f"Classification count mismatch: expected {len(batch)}, "
                 f"got {len(classified)}."
             )
 
-        seen: set[int] = set()
-
+        seen = set()
         for item in classified:
             validate_classification_schema(
                 item,
                 source="Claude classification",
             )
-
-            if set(item.keys()) != {
-                "index",
-                "counterparty",
-                "bucket",
-            }:
+            if set(item.keys()) != {"index", "counterparty", "bucket"}:
                 raise ValueError(
                     "Compact classification returned unexpected fields: "
-                    f"{set(item.keys())}"
+                    f"{sorted(item.keys())}"
                 )
-
             i = int(item["index"])
-
             if i not in batch or i in seen:
-                raise ValueError(
-                    f"Invalid/duplicate classification index: {i}"
-                )
-
+                raise ValueError(f"Invalid/duplicate classification index: {i}")
             seen.add(i)
             _apply_classification(final[i], item)
-
-        missing = set(batch) - seen
-        if missing:
-            raise ValueError(
-                f"Claude did not classify transaction indexes: "
-                f"{sorted(missing)}"
-            )
 
     validate_classified_transactions(final)
     return final
@@ -593,7 +638,7 @@ def classify_transactions(
 def validate_classified_transactions(
     transactions: list[dict[str, Any]],
 ) -> None:
-    expected = {
+    raw_fields = {
         "date",
         "raw_description",
         "ref_no",
@@ -601,43 +646,38 @@ def validate_classified_transactions(
         "credit",
         "balance",
         "ocr_uncertain",
+    }
+    derived_fields = {
         "counterparty",
         "final_category",
         "bucket",
         "direction_category",
     }
+    allowed_buckets = {
+        "Self Transfer (HDFC)",
+        "Investment",
+        "Rutugandha (Person)",
+        "Rent",
+        "Bills",
+        "Food & Delivery",
+        "Subscription",
+        "Person UPI",
+        "Bank Credit",
+        "Other Spend",
+    }
+
+    expected = raw_fields | derived_fields
 
     for index, tx in enumerate(transactions):
         if set(tx.keys()) != expected:
-            missing = expected - set(tx.keys())
-            extra = set(tx.keys()) - expected
             raise ValueError(
-                f"Classified transaction {index + 1} has incorrect fields. "
-                f"Missing={sorted(missing)}, Extra={sorted(extra)}"
+                f"Classified transaction {index + 1} has incorrect fields."
             )
 
-        if tx["bucket"] not in set(_BUCKETS.values()):
+        if tx["bucket"] not in allowed_buckets:
             raise ValueError(
                 f"Classified transaction {index + 1} has unsupported bucket: "
                 f"{tx['bucket']}"
-            )
-
-        if not isinstance(tx["counterparty"], str):
-            raise ValueError(
-                f"Classified transaction {index + 1}: "
-                "counterparty must be a string."
-            )
-
-        if not isinstance(tx["final_category"], str):
-            raise ValueError(
-                f"Classified transaction {index + 1}: "
-                "final_category must be a string."
-            )
-
-        if not isinstance(tx["direction_category"], str):
-            raise ValueError(
-                f"Classified transaction {index + 1}: "
-                "direction_category must be a string."
             )
 
 
@@ -848,19 +888,6 @@ async def process_statement(pdf_bytes: bytes) -> dict[str, Any]:
 
     dashboard = build_dashboard_data(classified_transactions, pdf_bytes)
 
-    total_tokens = (
-        TOTAL_USAGE["input_tokens"]
-        + TOTAL_USAGE["output_tokens"]
-    )
-    print("\n" + "=" * 60)
-    print("TOTAL CLAUDE USAGE")
-    print(f"Input tokens     : {TOTAL_USAGE['input_tokens']:,}")
-    print(f"Output tokens    : {TOTAL_USAGE['output_tokens']:,}")
-    print(f"Cache write      : {TOTAL_USAGE['cache_creation_input_tokens']:,}")
-    print(f"Cache read       : {TOTAL_USAGE['cache_read_input_tokens']:,}")
-    print(f"Total tokens     : {total_tokens:,}")
-    print("=" * 60)
-
     DATA_JSON.write_text(
         json.dumps(dashboard, ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -924,7 +951,7 @@ async def process_statement_endpoint(file: UploadFile = File(...)):
 if __name__ == "__main__":
     uvicorn.run(
         "bank_statement_dashboard:app",
-        host="127.0.0.1",
-        port=8000,
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", "8000")),
         reload=False,
     )

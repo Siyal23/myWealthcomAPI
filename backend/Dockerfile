@@ -1,6 +1,6 @@
 FROM python:3.12
 WORKDIR /usr/src/app
 COPY . .
-RUN pip install -r requirements.txt
-EXPOSE 3000
-CMD ["python", "./APIMain.py"]
+RUN pip install --no-cache-dir -r requirements.txt
+EXPOSE 8000
+CMD ["python", "./bank_statement_dashboard.py"]
